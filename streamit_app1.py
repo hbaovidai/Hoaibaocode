@@ -46,7 +46,7 @@ def generate_response(input_text, embedding_model):
 
 
 # Page title
-st.title("VanDucNgo - RAG")
+st.title("HOÀI BẢO ĐẸP TRAI - RAG")
 
 # File upload
 uploaded_file = st.file_uploader('Upload your file:', type='txt')
