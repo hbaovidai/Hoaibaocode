@@ -4,7 +4,7 @@ from langchain.text_splitter import CharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 from langchain.prompts import ChatPromptTemplate
 from langchain_openai.chat_models import ChatOpenAI
-from PyPDF2 import PdfReader  # Import thư viện đọc PDF
+from PyPDF2 import PdfReader
 
 PROMPT_TEMPLATE = """
 Answer the question based only on the following context:
@@ -16,7 +16,6 @@ Answer the question based only on the following context:
 Answer the question based on the above context: {question}
 """
 
-# Sử dụng SentenceTransformer thay vì OpenAIEmbeddings
 class CustomEmbeddings:
     def __init__(self, model_name="sentence-transformers/all-MiniLM-L6-v2"):
         self.model = SentenceTransformer(model_name)
@@ -27,12 +26,8 @@ class CustomEmbeddings:
     def embed_query(self, query):
         return self.model.encode(query, convert_to_tensor=True).tolist()
 
-
-def generate_response(input_text, embedding_model):
-    # Vector store
+def generate_response(input_text, embedding_model, openai_api_key):
     db = Chroma(embedding_function=embedding_model)
-    
-    # Tìm kiếm trong vector database
     results = db.similarity_search_with_relevance_scores(input_text, k=3)
     
     if len(results) == 0 or results[0][1] < 0.7:
@@ -45,16 +40,15 @@ def generate_response(input_text, embedding_model):
         model = ChatOpenAI(temperature=0.7, api_key=openai_api_key)
         st.info(model.invoke(prompt).content)
 
-
-# Page title
 st.title("HOÀI BẢO ĐẸP TRAI - RAG")
 
-# File upload: chỉ chấp nhận file PDF
+# Nhập OpenAI API Key ở sidebar
+openai_api_key = st.sidebar.text_input("OpenAI API Key", type="password")
+
 uploaded_file = st.file_uploader('Upload your file:', type='pdf')
 
 if st.button("Load Data"):
     if uploaded_file is not None:
-        # Sử dụng PyPDF2 để đọc nội dung file PDF
         pdf_reader = PdfReader(uploaded_file)
         text = ""
         for page in pdf_reader.pages:
@@ -63,14 +57,10 @@ if st.button("Load Data"):
                 text += page_text
         documents = [text]
         
-        # Chia nhỏ văn bản
         text_splitter = CharacterTextSplitter(chunk_size=300, chunk_overlap=100)
         chunks = text_splitter.create_documents(documents)
 
-        # Dùng mô hình sentence-transformers để tạo embeddings
         embedding_model = CustomEmbeddings()
-
-        # Tạo vector store từ dữ liệu
         db = Chroma.from_documents(chunks, embedding_model)
         st.success("Data Load OK")
 
@@ -79,4 +69,5 @@ with st.form("my_form"):
     submitted = st.form_submit_button("Submit", disabled=not uploaded_file)
 
     if submitted:
-        generate_response(text, embedding_model)
+        # Gọi hàm kèm theo openai_api_key
+        generate_response(text, embedding_model, openai_api_key)
