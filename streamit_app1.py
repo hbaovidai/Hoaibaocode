@@ -4,6 +4,7 @@ from langchain.text_splitter import CharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 from langchain.prompts import ChatPromptTemplate
 from langchain_openai.chat_models import ChatOpenAI
+from PyPDF2 import PdfReader  # Import thư viện đọc PDF
 
 PROMPT_TEMPLATE = """
 Answer the question based only on the following context:
@@ -48,12 +49,19 @@ def generate_response(input_text, embedding_model):
 # Page title
 st.title("HOÀI BẢO ĐẸP TRAI - RAG")
 
-# File upload
-uploaded_file = st.file_uploader('Upload your file:', type='txt')
+# File upload: chỉ chấp nhận file PDF
+uploaded_file = st.file_uploader('Upload your file:', type='pdf')
 
 if st.button("Load Data"):
     if uploaded_file is not None:
-        documents = [uploaded_file.read().decode()]
+        # Sử dụng PyPDF2 để đọc nội dung file PDF
+        pdf_reader = PdfReader(uploaded_file)
+        text = ""
+        for page in pdf_reader.pages:
+            page_text = page.extract_text()
+            if page_text:
+                text += page_text
+        documents = [text]
         
         # Chia nhỏ văn bản
         text_splitter = CharacterTextSplitter(chunk_size=300, chunk_overlap=100)
@@ -64,7 +72,7 @@ if st.button("Load Data"):
 
         # Tạo vector store từ dữ liệu
         db = Chroma.from_documents(chunks, embedding_model)
-        'Data Load OK'
+        st.success("Data Load OK")
 
 with st.form("my_form"):
     text = st.text_area("Enter text:", "Bạn muốn hỏi gì?")
@@ -72,4 +80,3 @@ with st.form("my_form"):
 
     if submitted:
         generate_response(text, embedding_model)
-
