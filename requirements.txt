@@ -3,3 +3,4 @@ sentence-transformers
 langchain
 langchain-community
 langchain-openai
+PyPDF2
