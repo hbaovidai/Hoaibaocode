@@ -4,6 +4,7 @@ from langchain.text_splitter import CharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 from langchain.prompts import ChatPromptTemplate
 from langchain_openai.chat_models import ChatOpenAI
+from langchain.schema import Document
 from PyPDF2 import PdfReader
 
 PROMPT_TEMPLATE = """
@@ -26,65 +27,67 @@ class CustomEmbeddings:
     def embed_query(self, query):
         return self.model.encode(query, convert_to_tensor=True).tolist()
 
-def generate_response(input_text, embedding_model, openai_api_key, db):
+def process_pdf(uploaded_file, embedding_model):
+    pdf_reader = PdfReader(uploaded_file)
+    text = "\n".join([page.extract_text() for page in pdf_reader.pages if page.extract_text()])
+    
+    text_splitter = CharacterTextSplitter(
+        chunk_size=300,
+        chunk_overlap=100,
+        separator="\n"
+    )
+    chunks = text_splitter.split_text(text)
+    documents = [Document(page_content=chunk) for chunk in chunks]
+    
+    db = Chroma.from_documents(documents, embedding_model)
+    return db
+
+def generate_response(input_text, openai_api_key):
+    if "db" not in st.session_state:
+        st.error("Vui lòng upload file PDF trước")
+        return
+    
+    db = st.session_state.db
     results = db.similarity_search_with_relevance_scores(input_text, k=3)
     
-    if len(results) == 0 or results[0][1] < 0.7:
-        st.info("Không tìm thấy kết quả nào")
-    else:
-        context_text = "\n\n---\n\n".join([doc.page_content for doc, _score in results])
-        prompt_template = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
-        prompt = prompt_template.format(context=context_text, question=input_text)
-
+    if not results or results[0][1] < 0.7:
+        st.info("Không tìm thấy thông tin phù hợp trong tài liệu")
+        return
+    
+    context_text = "\n\n---\n\n".join([doc.page_content for doc, _ in results])
+    prompt_template = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
+    prompt = prompt_template.format(context=context_text, question=input_text)
+    
+    try:
         model = ChatOpenAI(temperature=0.7, api_key=openai_api_key)
-        st.info(model.invoke(prompt).content)
+        response = model.invoke(prompt)
+        st.success(response.content)
+    except Exception as e:
+        st.error(f"Lỗi kết nối OpenAI: {str(e)}")
 
-st.title("HOÀI BẢO ĐẸP TRAI - RAG")
+# Main app
+st.title("HỆ THỐNG HỖ TRỢ TƯ VẤN - RAG")
 
-# Nhập OpenAI API Key ở sidebar
+# Sidebar config
 openai_api_key = st.sidebar.text_input("OpenAI API Key", type="password")
+embedding_model = CustomEmbeddings()
 
-# Sử dụng session_state để lưu trữ embedding_model và db
-if "embedding_model" not in st.session_state:
-    st.session_state.embedding_model = None
-if "db" not in st.session_state:
-    st.session_state.db = None
+# File upload
+uploaded_file = st.file_uploader('Tải lên tài liệu PDF', type='pdf')
+if uploaded_file and "db" not in st.session_state:
+    with st.spinner("Đang xử lý tài liệu..."):
+        st.session_state.db = process_pdf(uploaded_file, embedding_model)
+        st.success("Đã sẵn sàng hỏi đáp!")
 
-# Cho phép upload file PDF hoặc TXT
-uploaded_file = st.file_uploader('Upload your file:', type=['pdf', 'txt'])
-
-if st.button("Load Data"):
-    if uploaded_file is not None:
-        text = ""
-        # Xử lý file PDF
-        if uploaded_file.name.endswith('.pdf'):
-            pdf_reader = PdfReader(uploaded_file)
-            for page in pdf_reader.pages:
-                page_text = page.extract_text()
-                if page_text:
-                    text += page_text
-        # Xử lý file TXT
-        elif uploaded_file.name.endswith('.txt'):
-            text = uploaded_file.read().decode()
-        else:
-            st.error("Unsupported file type")
-        
-        if text:
-            documents = [text]
-            text_splitter = CharacterTextSplitter(chunk_size=300, chunk_overlap=100)
-            chunks = text_splitter.create_documents(documents)
-            st.session_state.embedding_model = CustomEmbeddings()
-            st.session_state.db = Chroma.from_documents(chunks, st.session_state.embedding_model)
-            st.success("Data Load OK")
-        else:
-            st.error("Không thể đọc nội dung từ file được tải lên")
-
-with st.form("my_form"):
-    text = st.text_area("Enter text:", "Bạn muốn hỏi gì?")
-    submitted = st.form_submit_button("Submit", disabled=(uploaded_file is None))
-
+# Q&A form
+with st.form("qa_form"):
+    question = st.text_area("Câu hỏi của bạn", "Bạn muốn hỏi gì?")
+    submitted = st.form_submit_button("Gửi câu hỏi", 
+                                    disabled=not (uploaded_file and openai_api_key))
+    
     if submitted:
-        if st.session_state.embedding_model is None or st.session_state.db is None:
-            st.error("Vui lòng bấm 'Load Data' trước khi submit!")
+        if not openai_api_key.startswith("sk-"):
+            st.error("Vui lòng nhập API key hợp lệ")
         else:
-            generate_response(text, st.session_state.embedding_model, openai_api_key, st.session_state.db)
+            with st.spinner("Đang tìm câu trả lời..."):
+                generate_response(question, openai_api_key)
